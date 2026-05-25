@@ -49,7 +49,7 @@ export default function WishlistCard({ item, onDelete, showDelete = true, curren
         )}
         
         {item.description && (
-          <p className="text-xs text-gray-500 italic mt-1 chunk break-words">"{item.description}"</p>
+          <p className="text-xs text-gray-500 italic mt-1 chunk wrap-break-word">"{item.description}"</p>
         )}
       </div>
 

@@ -275,7 +275,6 @@ export async function getMemberDetails(memberId: string) {
   }
 }
 
-// NEW ACTION: Claim a gift lock
 export async function reserveWishInDatabase(wishId: number) {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
@@ -292,7 +291,6 @@ export async function reserveWishInDatabase(wishId: number) {
   return data;
 }
 
-// NEW ACTION: Cancel a gift lock
 export async function unreserveWishInDatabase(wishId: number) {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
@@ -302,10 +300,32 @@ export async function unreserveWishInDatabase(wishId: number) {
     .from("wishes")
     .update({ reserved_by: null })
     .eq("id", wishId)
-    .eq("reserved_by", userId) // Safety catch: Only the individual worker who claimed it can unlock it
+    .eq("reserved_by", userId) 
     .select()
     .single();
 
   if (error) throw error;
   return data;
+}
+
+export async function handleToggleReserveAction(wishId: number, isCurrentlyReserved: boolean) {
+  if (isCurrentlyReserved) {
+    return await unreserveWishInDatabase(wishId);
+  } else {
+    return await reserveWishInDatabase(wishId);
+  }
+}
+
+export async function deleteAccountFromApplication() {
+  const { userId } = await auth();
+  if (!userId) throw new Error("Unauthorized");
+
+  const supabase = await getAuthedSupabaseClient();
+  await supabase.from("wishes").delete().eq("user_id", userId);
+  await supabase.from("group_members").delete().eq("user_id", userId);
+  await supabase.from("profiles").delete().eq("user_id", userId);
+
+  const client = await clerkClient();
+  await client.users.deleteUser(userId);
+  return { success: true };
 }
