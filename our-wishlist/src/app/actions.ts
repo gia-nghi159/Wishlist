@@ -114,13 +114,22 @@ export async function checkUserGroup() {
       .eq("user_id", userId)
       .maybeSingle(); 
 
-    if (error || !data) return null;
+    if (error) {
+      console.error("❌ SUPABASE GROUP ERROR:", error.message, error.details);
+      return null;
+    }
+    
+    if (!data) {
+      console.log("⚠️ Supabase found NO group matching this user ID:", userId);
+      return null;
+    }
     
     return { 
       groupId: data.group_id, 
       groupName: (data.groups as any)?.name || "Our Shared List" 
     };
-  } catch {
+  } catch (err) {
+    console.error("❌ CHECK USER GROUP CRASHED:", err);
     return null;
   }
 }
