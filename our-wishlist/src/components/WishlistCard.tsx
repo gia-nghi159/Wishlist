@@ -1,53 +1,95 @@
 "use client";
 
-type WishlistCardProps = {
-  item: {
-    id: number;
-    name: string;
-    isInspo: boolean;
-    description?: string;
-    url?: string;
-  };
-  onDelete: (id: number) => void;
+type WishItem = {
+  id: number;
+  name: string;
+  isInspo: boolean;
+  description: string;
+  url: string;
+  user_id: string;
+  reserved_by?: string | null;
 };
 
-export default function WishlistCard({ item, onDelete }: WishlistCardProps) {
+interface WishlistCardProps {
+  item: WishItem;
+  onDelete: (id: number) => Promise<void> | void;
+  showDelete?: boolean; 
+  currentUserId?: string | null;
+  onToggleReserve?: (id: number, isReserved: boolean) => void;
+}
+
+export default function WishlistCard({ item, onDelete, showDelete = true, currentUserId, onToggleReserve }: WishlistCardProps) {
+  const isOwnWish = item.user_id === currentUserId;
+
   return (
-    // NEW: We removed the border, shadow, and rounded corners! It's just a flat row now.
-    <div className="px-6 py-5 flex justify-between items-start bg-white transition-colors hover:bg-gray-50">
-      <div className="flex-1 pr-4">
-        
-        <div className="flex items-center gap-2 mb-1">
-          <h2 className="text-xl font-semibold text-gray-900">{item.name}</h2>
+    <div className="p-4 flex items-center justify-between hover:bg-gray-50/50 transition-colors">
+      <div className="flex flex-col gap-1 min-w-0 flex-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-semibold text-gray-950 truncate">{item.name}</span>
           {item.isInspo && (
-            <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs font-medium rounded-full">
-              ✨ Inspo
+            <span className="text-[10px] bg-purple-100 text-purple-700 font-bold px-2 py-0.5 rounded-full tracking-wider uppercase shrink-0">
+              Inspo
             </span>
           )}
         </div>
-
-        {item.description && (
-          <p className="text-sm text-gray-600 mb-2 italic">"{item.description}"</p>
-        )}
-
+        
         {item.url && (
           <a 
             href={item.url} 
             target="_blank" 
-            rel="noopener noreferrer"
-            className="text-sm text-blue-600 hover:text-blue-800 hover:underline font-medium inline-flex items-center gap-1 mt-1"
+            rel="noopener noreferrer" 
+            className="text-xs text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1 w-fit mt-0.5 shrink-0"
           >
-            {item.isInspo ? "🔗 See inspiration vibe" : "🔗 Buy exactly this"}
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">
+              <path d="M12.232 4.232a2.5 2.5 0 013.536 3.536l-1.225 1.224a.75.75 0 001.061 1.06l1.224-1.224a4 4 0 00-5.656-5.656l-3 3a4 4 0 00.225 5.865.75.75 0 00.977-1.138 2.5 2.5 0 01-.142-3.667l3-3z" />
+              <path d="M11.603 7.963a.75.75 0 00-.977 1.138 2.5 2.5 0 01.142 3.667l-3 3a2.5 2.5 0 01-3.536-3.536l1.225-1.224a.75.75 0 00-1.061-1.06l-1.224 1.224a4 4 0 105.656 5.656l3-3a4 4 0 00-.225-5.865z" />
+            </svg>
+            {item.isInspo ? "See inspiration vibe" : "Buy exactly this"}
           </a>
+        )}
+        
+        {item.description && (
+          <p className="text-xs text-gray-500 italic mt-1 chunk break-words">"{item.description}"</p>
         )}
       </div>
 
-      <button 
-        onClick={() => onDelete(item.id)}
-        className="text-sm text-red-500 hover:text-red-700 font-medium px-2 py-1 rounded hover:bg-red-50 transition-colors"
-      >
-        Remove
-      </button>
+      {/* ACTION BLOCK CONTAINER */}
+      <div className="flex items-center shrink-0 ml-4">
+        {isOwnWish ? (
+          // Your item: Show structural delete command
+          showDelete && (
+            <button
+              onClick={() => onDelete(item.id)}
+              className="text-xs font-semibold text-red-500 hover:text-red-700 transition-colors bg-red-50 hover:bg-red-100/60 px-3 py-1.5 rounded-xl"
+            >
+              Remove
+            </button>
+          )
+        ) : (
+          // Someone else's item: Render dynamic reservation engine
+          onToggleReserve && (
+            item.reserved_by === currentUserId ? (
+              <button
+                onClick={() => onToggleReserve(item.id, true)}
+                className="text-xs font-bold text-green-700 bg-green-50 hover:bg-green-100/80 border border-green-200 px-3 py-1.5 rounded-xl transition-all"
+              >
+                You Reserved ✓
+              </button>
+            ) : item.reserved_by ? (
+              <span className="text-xs font-medium text-gray-400 bg-gray-100 border border-gray-200/50 px-3 py-1.5 rounded-xl select-none flex items-center gap-1">
+                🔒 Taken
+              </span>
+            ) : (
+              <button
+                onClick={() => onToggleReserve(item.id, false)}
+                className="text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-100 px-3 py-1.5 rounded-xl transition-all shadow-sm"
+              >
+                Claim Gift 🎁
+              </button>
+            )
+          )
+        )}
+      </div>
     </div>
   );
 }
