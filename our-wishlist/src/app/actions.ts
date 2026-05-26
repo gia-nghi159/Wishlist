@@ -19,24 +19,51 @@ async function getAuthedSupabaseClient() {
   });
 }
 
-async function getUserGroupId(supabaseClient: any, userId: string) {
+// Relational Security Check: Verifies a user actually belongs to a group before query execution
+async function verifyMembership(supabaseClient: any, userId: string, groupId: string) {
   const { data, error } = await supabaseClient
     .from("group_members")
     .select("group_id")
     .eq("user_id", userId)
-    .single();
+    .eq("group_id", groupId)
+    .maybeSingle();
 
-  if (error || !data) throw new Error("User does not belong to any group.");
-  return data.group_id;
+  if (error || !data) throw new Error("Security Access Denied: You do not belong to this group.");
+  return true;
 }
 
-export async function getWishesFromDatabase() {
+// NEW ACTION: Gets a complete array of all groups a user belongs to
+export async function getUserGroups() {
   const { userId } = await auth();
   if (!userId) return [];
 
   try {
     const supabase = await getAuthedSupabaseClient();
-    const groupId = await getUserGroupId(supabase, userId);
+    const { data, error } = await supabase
+      .from("group_members")
+      .select("group_id, groups(name)")
+      .eq("user_id", userId);
+
+    if (error || !data) return [];
+    
+    return data.map((item) => ({
+      groupId: item.group_id,
+      groupName: (item.groups as any)?.name || "Shared List"
+    }));
+  } catch (err) {
+    console.error("Fetch Groups Error:", err);
+    return [];
+  }
+}
+
+// UPDATED: Now fetches wishes explicitly for whichever group workspace is active
+export async function getWishesFromDatabase(groupId: string) {
+  const { userId } = await auth();
+  if (!userId || !groupId) return [];
+
+  try {
+    const supabase = await getAuthedSupabaseClient();
+    await verifyMembership(supabase, userId, groupId);
 
     const { data, error } = await supabase
       .from("wishes")
@@ -52,13 +79,14 @@ export async function getWishesFromDatabase() {
   }
 }
 
-export async function addWishToDatabase(name: string, isInspo: boolean, description: string, url: string) {
+// UPDATED: Saves the new wish explicitly tagged to the active group context parameters
+export async function addWishToDatabase(name: string, isInspo: boolean, description: string, url: string, groupId: string) {
   const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
+  if (!userId || !groupId) throw new Error("Unauthorized");
 
   try {
     const supabase = await getAuthedSupabaseClient();
-    const groupId = await getUserGroupId(supabase, userId);
+    await verifyMembership(supabase, userId, groupId);
 
     const { data, error } = await supabase
       .from("wishes")

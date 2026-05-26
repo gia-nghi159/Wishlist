@@ -7,19 +7,37 @@ import Link from "next/link";
 import AddGiftForm from "../components/AddGiftForm";
 import WishlistCard from "../components/WishlistCard";
 import GroupOnboarding from "../components/GroupOnboarding";
-import { addWishToDatabase, deleteWishFromDatabase, getWishesFromDatabase, checkUserGroup, getGroupMembers, getMemberDetails, reserveWishInDatabase, unreserveWishInDatabase } from "./actions";
+import { 
+  addWishToDatabase, 
+  deleteWishFromDatabase, 
+  getWishesFromDatabase, 
+  getUserGroups, 
+  getGroupMembers, 
+  getMemberDetails, 
+  reserveWishInDatabase, 
+  unreserveWishInDatabase,
+  createGroup,
+  joinGroup
+} from "./actions";
 
 type WishItem = { id: number; name: string; isInspo: boolean; description: string; url: string; user_id: string; reserved_by?: string | null; };
 type GroupMember = { id: string; firstName: string; imageUrl: string; isMe: boolean; };
+type GroupWorkspace = { groupId: string; groupName: string; };
 
 function DashboardContent() {
   const [items, setItems] = useState<WishItem[]>([]);
   const [members, setMembers] = useState<GroupMember[]>([]); 
+  const [groups, setGroups] = useState<GroupWorkspace[]>([]);
   const [activeGroupName, setActiveGroupName] = useState<string | null>(null);
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isNewGroupModalOpen, setIsNewGroupModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  // New Group Inputs Context
+  const [groupNameInput, setGroupNameInput] = useState("");
+  const [joinCodeInput, setJoinCodeInput] = useState("");
   
   // URL STATE NAVIGATION
   const searchParams = useSearchParams();
@@ -58,15 +76,23 @@ function DashboardContent() {
     async function initializeApp() {
       if (isLoaded && isSignedIn) {
         setIsLoading(true);
-        const activeGroup = await checkUserGroup();
+        const userGroups = await getUserGroups();
+        setGroups(userGroups);
         
-        if (activeGroup) {
-          setActiveGroupName(activeGroup.groupName);
-          setActiveGroupId(activeGroup.groupId);
-          
+        let currentGroupId = activeGroupId;
+        let currentGroupName = activeGroupName;
+
+        if (userGroups.length > 0 && !currentGroupId) {
+          currentGroupId = userGroups[0].groupId;
+          currentGroupName = userGroups[0].groupName;
+          setActiveGroupId(currentGroupId);
+          setActiveGroupName(currentGroupName);
+        }
+        
+        if (currentGroupId) {
           const [dbWishes, groupMembers] = await Promise.all([
-            getWishesFromDatabase(),
-            getGroupMembers(activeGroup.groupId)
+            getWishesFromDatabase(currentGroupId),
+            getGroupMembers(currentGroupId)
           ]);
           
           setItems(dbWishes.map((wish: any) => ({
@@ -83,7 +109,7 @@ function DashboardContent() {
       }
     }
     initializeApp();
-  }, [isLoaded, isSignedIn]);
+  }, [isLoaded, isSignedIn, activeGroupId]);
 
   useEffect(() => {
     async function fetchPassport() {
@@ -102,11 +128,13 @@ function DashboardContent() {
     setActiveGroupId(id);
     setActiveGroupName(name);
     
-    const [dbWishes, groupMembers] = await Promise.all([
-      getWishesFromDatabase(),
-      getGroupMembers(id)
+    const [dbWishes, groupMembers, userGroups] = await Promise.all([
+      getWishesFromDatabase(id),
+      getGroupMembers(id),
+      getUserGroups()
     ]);
 
+    setGroups(userGroups);
     setItems(dbWishes.map((wish: any) => ({
       id: wish.id, name: wish.name, description: wish.description || "",
       url: wish.url || "", isInspo: wish.is_inspo, user_id: wish.user_id || "",
@@ -124,8 +152,9 @@ function DashboardContent() {
   };
 
   const handleAddItem = async (name: string, isInspo: boolean, description: string, url: string) => {
+    if (!activeGroupId) return;
     try {
-      const savedWish = await addWishToDatabase(name, isInspo, description, url);
+      const savedWish = await addWishToDatabase(name, isInspo, description, url, activeGroupId);
       setItems([{
         id: savedWish.id, name: savedWish.name, description: savedWish.description || "",
         url: savedWish.url || "", isInspo: savedWish.is_inspo, user_id: user?.id || "",
@@ -150,7 +179,6 @@ function DashboardContent() {
     }
   };
 
-  // NEW REACTIVE TOGGLER ENGINE
   const handleToggleReserve = async (wishId: number, isCurrentlyReserved: boolean) => {
     try {
       if (isCurrentlyReserved) {
@@ -165,8 +193,48 @@ function DashboardContent() {
     }
   };
 
+  const handleCreateGroupAction = async () => {
+    if (!groupNameInput.trim()) return;
+    try {
+      const newGroup = await createGroup(groupNameInput.trim());
+      setGroups(prev => [...prev, { groupId: newGroup.groupId, groupName: newGroup.groupName }]);
+      setItems([]);
+      setMembers([]);
+      setActiveGroupId(newGroup.groupId);
+      setActiveGroupName(newGroup.groupName);
+      setGroupNameInput("");
+      setIsNewGroupModalOpen(false);
+    } catch (err) {
+      alert("Failed to create group workspace.");
+    }
+  };
+
+  const handleJoinGroupAction = async () => {
+    if (!joinCodeInput.trim()) return;
+    try {
+      const joined = await joinGroup(joinCodeInput.trim());
+      setGroups(prev => [...prev, { groupId: joined.groupId, groupName: joined.groupName }]);
+      setItems([]);
+      setMembers([]);
+      setActiveGroupId(joined.groupId);
+      setActiveGroupName(joined.groupName);
+      setJoinCodeInput("");
+      setIsNewGroupModalOpen(false);
+    } catch (err) {
+      alert("Invalid code or you are already a member of this group.");
+    }
+  };
+
   const getItemsForUser = (userId: string) => items.filter(item => item.user_id === userId);
   const currentMember = members.find(m => m.id === activeTab);
+
+  if (!isLoading && groups.length === 0 && !activeGroupId) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50 p-4">
+        <GroupOnboarding onGroupLinked={handleGroupLinked} />
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden relative">
@@ -181,9 +249,7 @@ function DashboardContent() {
       {/* SIDEBAR */}
       <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-gray-900 text-gray-300 transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 flex flex-col border-r border-gray-800 ${isSidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="p-6 pb-2">
-          <h1 className="text-xl font-black text-white tracking-tight mb-1">Our Wishlist 🎁</h1>
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-4">{activeGroupName}</p>
-          
+          <h1 className="text-xl font-black text-white tracking-tight mb-10 mt-5">{activeGroupName} 🎁</h1>          
           <button 
             onClick={copyJoinCode}
             className="w-full flex items-center justify-between bg-gray-800 hover:bg-gray-700 transition-colors px-3 py-2 rounded-lg text-sm border border-gray-700/50 group"
@@ -198,6 +264,40 @@ function DashboardContent() {
         </div>
 
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-6 scrollbar-hide">
+          {/* UPGRADED RELATIONAL GROUPS BLOCK */}
+          <div>
+            <div className="px-3 flex items-center justify-between mb-2">
+              <h2 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Groups ({groups.length})</h2>
+              <button 
+                onClick={() => setIsNewGroupModalOpen(true)}
+                className="text-[10px] text-blue-400 hover:text-blue-300 font-bold uppercase tracking-wider"
+              >
+                + Create/ Join
+              </button>
+            </div>
+            <div className="space-y-1 max-h-[140px] overflow-y-auto pr-1">
+              {groups.map((g) => (
+                <button
+                  key={g.groupId}
+                  onClick={() => {
+                    if (g.groupId === activeGroupId) return;
+                    setItems([]);
+                    setMembers([]);
+                    setActiveGroupId(g.groupId);
+                    setActiveGroupName(g.groupName);
+                    updateUrl("all", "wishlist");
+                  }}
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors text-left truncate ${
+                    activeGroupId === g.groupId ? "bg-gray-800 text-white font-bold" : "hover:bg-gray-800/30 text-gray-300 hover:text-gray-100 font-medium"
+                  }`}
+                >
+                  <span className="text-xs">🎉</span>
+                  <span className="truncate">{g.groupName}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div>
             <h2 className="px-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Feeds</h2>
             <button
@@ -501,10 +601,61 @@ function DashboardContent() {
         </div>
       </main>
 
+      {/* COMPONENT CREATION MODAL CONTAINER */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden relative border border-gray-100">
             <AddGiftForm onAddItem={handleAddItem} onClose={() => setIsModalOpen(false)} />
+          </div>
+        </div>
+      )}
+
+      {/* NEW RELATIONAL GROUPS CONFIGURATION SHEET */}
+      {isNewGroupModalOpen && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden relative border border-gray-100 p-6 space-y-6 animate-fadeIn">
+            <div className="flex items-center justify-between border-b pb-2">
+              <h3 className="font-black text-gray-950 text-base">Manage Spaces</h3>
+              <button onClick={() => setIsNewGroupModalOpen(false)} className="text-gray-400 hover:text-gray-600 text-sm font-bold">✕</button>
+            </div>
+            
+            <div className="space-y-2">
+              <label className="block text-xs font-bold uppercase tracking-wider text-gray-500">Create a New Wishlist Group</label>
+              <div className="flex gap-2">
+                <input 
+                  type="text" 
+                  placeholder="e.g., Family, Friends" 
+                  value={groupNameInput}
+                  onChange={(e) => setGroupNameInput(e.target.value)}
+                  className="flex-1 border text-sm rounded-xl p-2.5 bg-gray-50 text-gray-900 focus:outline-none focus:border-gray-300"
+                />
+                <button 
+                  onClick={handleCreateGroupAction}
+                  className="bg-gray-950 text-white font-bold text-xs px-4 rounded-xl hover:bg-gray-800 transition-colors"
+                >
+                  Create
+                </button>
+              </div>
+            </div>
+            
+            <div className="border-t border-gray-100 pt-4 space-y-2">
+              <label className="block text-xs font-bold uppercase tracking-wider text-gray-500">Join an Existing Shared Space</label>
+              <div className="flex gap-2">
+                <input 
+                  type="text" 
+                  placeholder="Paste group code here" 
+                  value={joinCodeInput}
+                  onChange={(e) => setJoinCodeInput(e.target.value)}
+                  className="flex-1 border text-sm rounded-xl p-2.5 bg-gray-50 text-gray-900 focus:outline-none focus:border-gray-300"
+                />
+                <button 
+                  onClick={handleJoinGroupAction}
+                  className="bg-gray-950 text-white font-bold text-xs px-4 rounded-xl hover:bg-gray-800 transition-colors"
+                >
+                  Join
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
