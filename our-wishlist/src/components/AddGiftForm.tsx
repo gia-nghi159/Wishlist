@@ -4,7 +4,7 @@ import { useState } from "react";
 
 type AddGiftFormProps = {
   onAddItem: (name: string, isInspo: boolean, description: string, url: string) => void;
-  onClose: () => void; // NEW: The walkie-talkie to tell the main page to close the popup!
+  onClose: () => void; 
 };
 
 export default function AddGiftForm({ onAddItem, onClose }: AddGiftFormProps) {
@@ -24,21 +24,19 @@ export default function AddGiftForm({ onAddItem, onClose }: AddGiftFormProps) {
     setIsInspo(false);
     setDescription("");
     
-    // NEW: Automatically close the modal after submitting!
     onClose(); 
   };
 
   return (
-    // Notice we removed the border and background colors from the form tag!
     <form onSubmit={handleSubmit} className="p-6">
       
-      {/* NEW: A clean header with an "X" close button */}
+      {/* Gift Form */}
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xl font-bold text-gray-900">Add a new wish</h2>
+        <h2 className="text-xl font-bold text-[#618264]">Add a new wish</h2>
         <button 
           type="button" 
           onClick={onClose}
-          className="text-gray-400 hover:text-gray-700 text-3xl leading-none transition-colors"
+          className="text-[#618264] text-3xl leading-none transition-colors"
         >
           &times;
         </button>
@@ -50,7 +48,7 @@ export default function AddGiftForm({ onAddItem, onClose }: AddGiftFormProps) {
           placeholder="What do you want?" 
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="w-full p-3 border rounded-lg bg-gray-50 focus:bg-white transition-colors"
+          className="w-full p-3 border rounded-lg bg-[#D0E7D2] focus:bg-[#B0D9B1] transition-colors"
           required
         />
         
@@ -58,7 +56,7 @@ export default function AddGiftForm({ onAddItem, onClose }: AddGiftFormProps) {
           placeholder="Add some details or notes... (Optional)" 
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          className="w-full p-3 border rounded-lg bg-gray-50 focus:bg-white resize-none transition-colors"
+          className="w-full p-3 border rounded-lg bg-[#D0E7D2] focus:bg-[#B0D9B1] resize-none transition-colors"
           rows={3}
         />
 
@@ -67,18 +65,18 @@ export default function AddGiftForm({ onAddItem, onClose }: AddGiftFormProps) {
           placeholder="Link (optional)" 
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          className="w-full p-3 border rounded-lg bg-gray-50 focus:bg-white transition-colors"
+          className="w-full p-3 border rounded-lg bg-[#D0E7D2] focus:bg-[#B0D9B1] transition-colors"
         />
 
-        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border">
+        <div className="flex items-center justify-between p-3 bg-[#D0E7D2] rounded-lg border">
           <span className="font-medium text-gray-700 flex items-center gap-2">
-            ✨ Inspiration Only <span className="text-sm font-normal text-gray-400">(Vibe matters most)</span>
+            💫 Inspiration Only <span className="text-sm font-normal text-gray-600">(Vibe matters most)</span>
           </span>
           <button
             type="button"
             onClick={() => setIsInspo(!isInspo)}
             className={`${
-              isInspo ? "bg-blue-600" : "bg-gray-300"
+              isInspo ? "bg-[#618264]" : "bg-[#B0D9B1]"
             } relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none`}
           >
             <span
@@ -91,7 +89,7 @@ export default function AddGiftForm({ onAddItem, onClose }: AddGiftFormProps) {
 
         <button 
           type="submit" 
-          className="w-full bg-gray-900 text-white font-semibold py-3 rounded-lg hover:bg-black transition-colors mt-4 shadow-md"
+          className="w-full bg-[#618264] text-white font-semibold py-3 rounded-lg hover:bg-[#4A6A4C] transition-colors mt-4 shadow-md"
         >
           Add to Wishlist
         </button>

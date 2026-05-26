@@ -25,10 +25,10 @@ export default function WishlistCard({ item, onDelete, showDelete = true, curren
     <div className="p-4 flex items-center justify-between hover:bg-gray-50/50 transition-colors">
       <div className="flex flex-col gap-1 min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-semibold text-gray-950 truncate">{item.name}</span>
+          <span className="font-semibold text-[#618264] truncate">{item.name}</span>
           {item.isInspo && (
-            <span className="text-[10px] bg-purple-100 text-purple-700 font-bold px-2 py-0.5 rounded-full tracking-wider uppercase shrink-0">
-              Inspo
+            <span className="text-[10px] bg-[#D0E7D2] text-[#618264] font-bold px-2 py-0.5 rounded-full tracking-wider uppercase shrink-0">
+              💫 INSPO
             </span>
           )}
         </div>
@@ -38,7 +38,7 @@ export default function WishlistCard({ item, onDelete, showDelete = true, curren
             href={item.url} 
             target="_blank" 
             rel="noopener noreferrer" 
-            className="text-xs text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1 w-fit mt-0.5 shrink-0"
+            className="text-xs text-[#618264] hover:text-[#618264] hover:underline flex items-center gap-1 w-fit mt-0.5 shrink-0"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">
               <path d="M12.232 4.232a2.5 2.5 0 013.536 3.536l-1.225 1.224a.75.75 0 001.061 1.06l1.224-1.224a4 4 0 00-5.656-5.656l-3 3a4 4 0 00.225 5.865.75.75 0 00.977-1.138 2.5 2.5 0 01-.142-3.667l3-3z" />
@@ -49,7 +49,7 @@ export default function WishlistCard({ item, onDelete, showDelete = true, curren
         )}
         
         {item.description && (
-          <p className="text-xs text-gray-500 italic mt-1 chunk wrap-break-word">"{item.description}"</p>
+          <p className="text-xs bg-white text-[#618264] italic mt-1 chunk wrap-break-word">"{item.description}"</p>
         )}
       </div>
 
@@ -82,7 +82,7 @@ export default function WishlistCard({ item, onDelete, showDelete = true, curren
             ) : (
               <button
                 onClick={() => onToggleReserve(item.id, false)}
-                className="text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-100 px-3 py-1.5 rounded-xl transition-all shadow-sm"
+                className="text-xs font-bold text-white bg-[#79AC78] hover:bg-[#618264] border border-green-100 px-3 py-1.5 rounded-xl transition-all shadow-sm"
               >
                 Claim Gift 🎁
               </button>
