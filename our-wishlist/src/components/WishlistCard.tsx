@@ -13,12 +13,13 @@ type WishItem = {
 interface WishlistCardProps {
   item: WishItem;
   onDelete: (id: number) => Promise<void> | void;
+  onEdit?: (item: WishItem) => void;
   showDelete?: boolean; 
   currentUserId?: string | null;
   onToggleReserve?: (id: number, isReserved: boolean) => void;
 }
 
-export default function WishlistCard({ item, onDelete, showDelete = true, currentUserId, onToggleReserve }: WishlistCardProps) {
+export default function WishlistCard({ item, onDelete, onEdit, showDelete = true, currentUserId, onToggleReserve }: WishlistCardProps) {
   const isOwnWish = item.user_id === currentUserId;
 
   return (
@@ -38,7 +39,7 @@ export default function WishlistCard({ item, onDelete, showDelete = true, curren
             href={item.url} 
             target="_blank" 
             rel="noopener noreferrer" 
-            className="text-xs text-[#618264] hover:text-[#618264] hover:underline flex items-center gap-1 w-fit mt-0.5 shrink-0"
+            className="text-xs text-[#618264] hover:text-[#4A6A4C] hover:underline flex items-center gap-1 w-fit mt-0.5 shrink-0"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">
               <path d="M12.232 4.232a2.5 2.5 0 013.536 3.536l-1.225 1.224a.75.75 0 001.061 1.06l1.224-1.224a4 4 0 00-5.656-5.656l-3 3a4 4 0 00.225 5.865.75.75 0 00.977-1.138 2.5 2.5 0 01-.142-3.667l3-3z" />
@@ -54,19 +55,27 @@ export default function WishlistCard({ item, onDelete, showDelete = true, curren
       </div>
 
       {/* ACTION BLOCK CONTAINER */}
-      <div className="flex items-center shrink-0 ml-4">
+      <div className="flex items-center shrink-0 ml-4 gap-2">
         {isOwnWish ? (
-          // Your item: Show structural delete command
           showDelete && (
-            <button
-              onClick={() => onDelete(item.id)}
-              className="text-xs font-semibold text-red-500 hover:text-red-700 transition-colors bg-red-50 hover:bg-red-100/60 px-3 py-1.5 rounded-xl"
-            >
-              Remove
-            </button>
+            <>
+              {onEdit && (
+                <button
+                  onClick={() => onEdit(item)}
+                  className="text-xs font-semibold text-[#618264] hover:text-[#4A6A4C] transition-colors bg-[#D0E7D2]/50 hover:bg-[#D0E7D2] px-3 py-1.5 rounded-xl"
+                >
+                  Edit
+                </button>
+              )}
+              <button
+                onClick={() => onDelete(item.id)}
+                className="text-xs font-semibold text-red-500 hover:text-red-700 transition-colors bg-red-50 hover:bg-red-100/60 px-3 py-1.5 rounded-xl"
+              >
+                Remove
+              </button>
+            </>
           )
         ) : (
-          // Someone else's item: Render dynamic reservation engine
           onToggleReserve && (
             item.reserved_by === currentUserId ? (
               <button
@@ -76,7 +85,7 @@ export default function WishlistCard({ item, onDelete, showDelete = true, curren
                 You Reserved ✓
               </button>
             ) : item.reserved_by ? (
-              <span className="text-xs font-medium text-gray-400 bg-gray-100 border border-gray-200/50 px-3 py-1.5 rounded-xl select-none flex items-center gap-1">
+              <span className="text-xs font-medium text-gray-500 bg-gray-100 border border-gray-200/50 px-3 py-1.5 rounded-xl select-none flex items-center gap-1">
                 🔒 Taken
               </span>
             ) : (

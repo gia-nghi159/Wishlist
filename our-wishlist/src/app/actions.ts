@@ -32,7 +32,7 @@ async function verifyMembership(supabaseClient: any, userId: string, groupId: st
   return true;
 }
 
-// NEW ACTION: Gets a complete array of all groups a user belongs to
+// Gets a complete array of all groups a user belongs to
 export async function getUserGroups() {
   const { userId } = await auth();
   if (!userId) return [];
@@ -41,14 +41,15 @@ export async function getUserGroups() {
     const supabase = await getAuthedSupabaseClient();
     const { data, error } = await supabase
       .from("group_members")
-      .select("group_id, groups(name)")
+      .select("group_id, groups(name, created_by)") 
       .eq("user_id", userId);
 
     if (error || !data) return [];
     
     return data.map((item) => ({
       groupId: item.group_id,
-      groupName: (item.groups as any)?.name || "Shared List"
+      groupName: (item.groups as any)?.name || "Shared List",
+      createdBy: (item.groups as any)?.created_by || null 
     }));
   } catch (err) {
     console.error("Fetch Groups Error:", err);
@@ -161,14 +162,11 @@ export async function createGroup(groupName: string) {
 
   const { data: group, error: groupError } = await supabase
     .from("groups")
-    .insert([{ name: groupName }])
+    .insert([{ name: groupName, created_by: userId }]) // Tags the creator
     .select()
     .single();
 
-  if (groupError) {
-    console.error("DB SCHEMA ERROR:", groupError);
-    throw new Error(`Database rejected: ${groupError.message}`);
-  }
+  if (groupError) throw new Error(`Database rejected: ${groupError.message}`);
 
   const { error: memberError } = await supabase
     .from("group_members")
@@ -176,7 +174,7 @@ export async function createGroup(groupName: string) {
 
   if (memberError) throw new Error("Failed to link user to the new group.");
 
-  return { groupId: group.id, groupName: group.name };
+  return { groupId: group.id, groupName: group.name, createdBy: userId };
 }
 
 export async function joinGroup(groupId: string) {
@@ -356,4 +354,65 @@ export async function deleteAccountFromApplication() {
   const client = await clerkClient();
   await client.users.deleteUser(userId);
   return { success: true };
+}
+
+export async function updateGroupInDatabase(groupId: string, newName: string) {
+  const { userId } = await auth();
+  if (!userId) throw new Error("Unauthorized");
+
+  const supabase = await getAuthedSupabaseClient();
+  // Ensure user is actually in the group before allowing them to edit the name
+  await verifyMembership(supabase, userId, groupId);
+
+  const { error } = await supabase
+    .from("groups")
+    .update({ name: newName })
+    .eq("id", groupId);
+
+  if (error) throw error;
+  return true;
+}
+
+export async function updateWishInDatabase(id: number, name: string, isInspo: boolean, description: string, url: string) {
+  const { userId } = await auth();
+  if (!userId) throw new Error("Unauthorized");
+
+  const supabase = await getAuthedSupabaseClient();
+  const { error } = await supabase
+    .from("wishes")
+    .update({
+      name,
+      description: description || null,
+      url: url || null,
+      is_inspo: isInspo,
+    })
+    .eq("id", id)
+    .eq("user_id", userId); // Ensure they own the wish
+
+  if (error) throw error;
+  return true;
+}
+
+export async function deleteGroupFromDatabase(groupId: string) {
+  const { userId } = await auth();
+  if (!userId) throw new Error("Unauthorized");
+
+  const supabase = await getAuthedSupabaseClient();
+  
+  // Verify the person deleting is the actual creator
+  const { data: groupData } = await supabase
+    .from("groups")
+    .select("created_by")
+    .eq("id", groupId)
+    .single();
+    
+  if (groupData?.created_by !== userId) {
+    throw new Error("Security Access Denied: Only the group creator can delete this space.");
+  }
+
+  // Delete the group
+  const { error } = await supabase.from("groups").delete().eq("id", groupId);
+
+  if (error) throw new Error(`Failed to delete group: ${error.message}`);
+  return true;
 }

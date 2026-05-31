@@ -11,9 +11,12 @@ import StylePassportView from "../components/StylePassportView";
 import GroupsModal from "../components/GroupsModal";
 import { 
   addWishToDatabase, 
+  updateWishInDatabase,
   deleteWishFromDatabase, 
   getWishesFromDatabase, 
   getUserGroups, 
+  updateGroupInDatabase,
+  deleteGroupFromDatabase, 
   getGroupMembers, 
   getMemberDetails, 
   reserveWishInDatabase, 
@@ -24,7 +27,7 @@ import {
 
 type WishItem = { id: number; name: string; isInspo: boolean; description: string; url: string; user_id: string; reserved_by?: string | null; };
 type GroupMember = { id: string; firstName: string; imageUrl: string; isMe: boolean; };
-type GroupWorkspace = { groupId: string; groupName: string; };
+type GroupWorkspace = { groupId: string; groupName: string; createdBy?: string | null; };
 
 function DashboardContent() {
   const [items, setItems] = useState<WishItem[]>([]);
@@ -36,6 +39,11 @@ function DashboardContent() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isNewGroupModalOpen, setIsNewGroupModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Edit States
+  const [editingWish, setEditingWish] = useState<WishItem | null>(null);
+  const [editingGroup, setEditingGroup] = useState<{ id: string, name: string, createdBy?: string | null } | null>(null);
+  const [editGroupInput, setEditGroupInput] = useState("");
 
   // New Group States
   const [groupNameInput, setGroupNameInput] = useState("");
@@ -153,20 +161,27 @@ function DashboardContent() {
     setTimeout(() => setCopied(false), 2000); 
   };
 
-  const handleAddItem = async (name: string, isInspo: boolean, description: string, url: string) => {
+  const handleAddOrEditWish = async (name: string, isInspo: boolean, description: string, url: string) => {
     if (!activeGroupId) return;
     try {
-      const savedWish = await addWishToDatabase(name, isInspo, description, url, activeGroupId);
-      setItems([{
-        id: savedWish.id, name: savedWish.name, description: savedWish.description || "",
-        url: savedWish.url || "", isInspo: savedWish.is_inspo, user_id: user?.id || "",
-        reserved_by: null
-      }, ...items]); 
-      setIsModalOpen(false);
-
-      if (user?.id) {
-        updateUrl(user.id, "wishlist");
+      if (editingWish) {
+        // Edit Mode
+        await updateWishInDatabase(editingWish.id, name, isInspo, description, url);
+        setItems(items.map(item => item.id === editingWish.id ? {
+          ...item, name, isInspo, description, url
+        } : item));
+        setEditingWish(null);
+      } else {
+        // Add Mode
+        const savedWish = await addWishToDatabase(name, isInspo, description, url, activeGroupId);
+        setItems([{
+          id: savedWish.id, name: savedWish.name, description: savedWish.description || "",
+          url: savedWish.url || "", isInspo: savedWish.is_inspo, user_id: user?.id || "",
+          reserved_by: null
+        }, ...items]); 
+        if (user?.id) updateUrl(user.id, "wishlist");
       }
+      setIsModalOpen(false);
     } catch (err) {
       alert("Oops! Failed to save your wish.");
     }
@@ -227,6 +242,55 @@ function DashboardContent() {
     }
   };
 
+  const handleUpdateGroup = async (e: React.SubmitEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editingGroup || !editGroupInput.trim()) return;
+    try {
+      await updateGroupInDatabase(editingGroup.id, editGroupInput.trim());
+      setGroups(groups.map(g => g.groupId === editingGroup.id ? { ...g, groupName: editGroupInput.trim() } : g));
+      if (activeGroupId === editingGroup.id) {
+        setActiveGroupName(editGroupInput.trim());
+      }
+      setEditingGroup(null);
+    } catch (err: any) {
+      alert("DATABASE ERROR: " + err.message);
+    }
+  };
+
+  const handleDeleteGroup = async () => {
+    if (!editingGroup) return;
+    
+    const isConfirmed = window.confirm(
+      "⚠️ WARNING: This will permanently delete this space.\n\nThis cannot be undone.\n\nAre you sure you want to delete this group?"
+    );
+
+    if (!isConfirmed) return;
+
+    try {
+      await deleteGroupFromDatabase(editingGroup.id);
+      
+      const remainingGroups = groups.filter(g => g.groupId !== editingGroup.id);
+      setGroups(remainingGroups);
+      
+      if (activeGroupId === editingGroup.id) {
+        if (remainingGroups.length > 0) {
+          setActiveGroupId(remainingGroups[0].groupId);
+          setActiveGroupName(remainingGroups[0].groupName);
+          updateUrl("all", "wishlist");
+        } else {
+          setActiveGroupId(null);
+          setActiveGroupName(null);
+          setItems([]);
+          setMembers([]);
+        }
+      }
+      setEditingGroup(null);
+      setIsNewGroupModalOpen(false);
+    } catch (err: any) {
+      alert("ERROR: " + err.message);
+    }
+  };
+
   const getItemsForUser = (userId: string) => items.filter(item => item.user_id === userId);
   const currentMember = members.find(m => m.id === activeTab);
 
@@ -263,6 +327,11 @@ function DashboardContent() {
           updateUrl("all", "wishlist");
         }}
         onOpenNewGroupModal={() => setIsNewGroupModalOpen(true)}
+        onEditGroup={(id, name) => {
+          const targetGroup = groups.find(g => g.groupId === id);
+          setEditingGroup({ id, name, createdBy: targetGroup?.createdBy });
+          setEditGroupInput(name);
+        }}
         members={members}
         activeTab={activeTab}
         onUpdateUrl={updateUrl}
@@ -300,7 +369,12 @@ function DashboardContent() {
               </div>
             )}
             {activeView === "wishlist" && (
-              <button onClick={() => setIsModalOpen(true)} className="bg-[#79AC78] text-white px-5 py-2 rounded-full font-semibold hover:bg-[#618264] transition-colors text-sm shadow-md whitespace-nowrap">+ Add Wish</button>
+              <button 
+                onClick={() => { setEditingWish(null); setIsModalOpen(true); }} 
+                className="bg-[#79AC78] text-white px-5 py-2 rounded-full font-semibold hover:bg-[#618264] transition-colors text-sm shadow-md whitespace-nowrap"
+              >
+                + Add Wish
+              </button>
             )}
           </div>
         </header>
@@ -315,7 +389,15 @@ function DashboardContent() {
                   <p className="text-center text-gray-400 py-12 text-sm">No items in this list yet.</p>
                 ) : (
                   getItemsForUser(activeTab).map(item => (
-                    <WishlistCard key={item.id} item={item} onDelete={handleDelete} showDelete={item.user_id === user?.id} currentUserId={user?.id} onToggleReserve={handleToggleReserve} />
+                    <WishlistCard 
+                      key={item.id} 
+                      item={item} 
+                      onDelete={handleDelete} 
+                      onEdit={(item) => { setEditingWish(item); setIsModalOpen(true); }}
+                      showDelete={item.user_id === user?.id} 
+                      currentUserId={user?.id} 
+                      onToggleReserve={handleToggleReserve} 
+                    />
                   ))
                 )}
               </div>
@@ -342,7 +424,15 @@ function DashboardContent() {
                     </div>
                     <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm divide-y divide-gray-100">
                       {memberItems.map(item => (
-                        <WishlistCard key={item.id} item={item} onDelete={handleDelete} showDelete={item.user_id === user?.id} currentUserId={user?.id} onToggleReserve={handleToggleReserve} />
+                        <WishlistCard 
+                          key={item.id} 
+                          item={item} 
+                          onDelete={handleDelete} 
+                          onEdit={(item) => { setEditingWish(item); setIsModalOpen(true); }}
+                          showDelete={item.user_id === user?.id} 
+                          currentUserId={user?.id} 
+                          onToggleReserve={handleToggleReserve} 
+                        />
                       ))}
                     </div>
                   </section>
@@ -352,7 +442,7 @@ function DashboardContent() {
             </div>
           )}
 
-          {/* UPDATED: Pinterest Gallery Mode inside Frosted Glass Pane */}
+          {/* Pinterest Gallery Mode */}
           {activeTab === "all" && allWishesLayout === "gallery" && (
             <div className="max-w-7xl mx-auto bg-white/60 backdrop-blur-md p-6 sm:p-8 rounded-3xl border border-white/50 shadow-sm">
               <div className="columns-1 md:columns-2 xl:columns-3 gap-6 space-y-6">
@@ -379,7 +469,7 @@ function DashboardContent() {
                             <div key={item.id} className="py-4 flex flex-col gap-1.5 group relative">
                               <div className="flex justify-between items-start gap-2">
                                 <span className="text-sm font-bold text-[#618264] leading-tight">{item.name}</span>
-                                {item.isInspo && <span className="text-[10px] bg-[#D0E7D2] text-[#618264] font-bold px-2 py-0.5 rounded-full tracking-wider uppercase shrink-0">💫 INSPO</span>}
+                                {item.isInspo && <span className="text-[9px] bg-[#D0E7D2] text-[#618264] font-bold px-2 py-0.5 rounded-full shrink-0 tracking-wider">💫 INSPO</span>}
                               </div>
                               {item.url && (
                                 <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-xs text-[#618264] hover:text-[#4A6A4C] hover:underline flex items-center gap-1 w-fit mt-0.5 shrink-0">
@@ -392,15 +482,18 @@ function DashboardContent() {
                               <div className="mt-2 flex items-center justify-between w-full h-6">
                                 {!isOwnWish && (
                                   item.reserved_by === user?.id ? (
-                                    <button onClick={() => handleToggleReserve(item.id, true)} className="text-xs font-bold text-green-700 bg-green-50 hover:bg-green-100/80 border border-green-200 px-3 py-1.5 rounded-xl transition-all">You Reserved ✓</button>
+                                    <button onClick={() => handleToggleReserve(item.id, true)} className="text-[10px] font-bold text-green-700 bg-green-50 px-2 py-1 rounded-md border border-green-200">Reserved by You ✓</button>
                                   ) : item.reserved_by ? (
-                                    <span className="text-xs font-medium text-gray-500 bg-gray-100 border border-gray-200/50 px-3 py-1.5 rounded-xl select-none flex items-center gap-1">🔒 Taken</span>
+                                    <span className="text-[10px] font-medium text-gray-400 bg-gray-100 px-2 py-1 rounded-md">🔒 Claimed</span>
                                   ) : (
-                                    <button onClick={() => handleToggleReserve(item.id, false)} className="text-xs font-bold text-white bg-[#79AC78] hover:bg-[#618264] border border-green-100 px-3 py-1.5 rounded-xl transition-all shadow-sm">Claim Gift 🎁</button>
+                                    <button onClick={() => handleToggleReserve(item.id, false)} className="text-[10px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded-md border border-blue-100 transition-colors">Reserve Gift 🎁</button>
                                   )
                                 )}
                                 {isOwnWish && (
-                                  <button onClick={() => handleDelete(item.id)} className="text-xs font-semibold text-red-500 hover:text-red-700 transition-colors bg-red-50 hover:bg-red-100/60 px-3 py-1.5 rounded-xl">Remove</button>
+                                  <div className="flex gap-2 ml-auto">
+                                    <button onClick={() => { setEditingWish(item); setIsModalOpen(true); }} className="text-[10px] font-bold text-[#618264] hover:text-[#4A6A4C] uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-opacity bg-white border-r border-gray-100 pr-2">Edit</button>
+                                    <button onClick={() => handleDelete(item.id)} className="text-[10px] font-bold text-red-400 hover:text-red-600 uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-opacity bg-white pl-2">Remove</button>
+                                  </div>
                                 )}
                               </div>
                             </div>
@@ -416,11 +509,54 @@ function DashboardContent() {
         </div>
       </main>
 
-      {/* COMPONENT CREATION MODAL CONTAINER */}
+      {/* MODULAR WISH MODAL */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden relative border border-gray-100">
-            <AddGiftForm onAddItem={handleAddItem} onClose={() => setIsModalOpen(false)} />
+            <AddGiftForm initialData={editingWish} onSubmit={handleAddOrEditWish} onClose={() => { setIsModalOpen(false); setEditingWish(null); }} />
+          </div>
+        </div>
+      )}
+
+      {/* EDIT GROUP NAME MODAL */}
+      {editingGroup && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden relative border border-gray-100 p-6 space-y-6 animate-fadeIn">
+            <div className="flex items-center justify-between border-b pb-2">
+              <h3 className="font-black text-[#618264] text-base">Edit Group</h3>
+              <button onClick={() => setEditingGroup(null)} className="text-gray-400 hover:text-[#618264] text-sm font-bold">✕</button>
+            </div>
+            <form onSubmit={handleUpdateGroup} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-[#618264] mb-2">Group Name</label>
+                <input 
+                  type="text" 
+                  value={editGroupInput}
+                  onChange={(e) => setEditGroupInput(e.target.value)}
+                  className="w-full border text-sm rounded-xl p-2.5 bg-gray-50 text-[#618264] focus:outline-none focus:border-green-300"
+                  required
+                />
+              </div>
+              <div className="flex flex-col gap-2 pt-2">
+                <button 
+                  type="submit"
+                  className="w-full bg-[#618264] text-white font-bold text-sm py-2.5 rounded-xl hover:bg-[#4A6A4C] transition-colors"
+                >
+                  Save Changes
+                </button>
+                
+                {/* SECURITY CHECK: Only show the delete button to the creator */}
+                {editingGroup.createdBy === user?.id && (
+                  <button 
+                    type="button"
+                    onClick={handleDeleteGroup}
+                    className="w-full bg-red-50 text-red-600 font-bold text-sm py-2.5 rounded-xl hover:bg-red-100 transition-colors border border-red-100 mt-2"
+                  >
+                    Delete Entire Group
+                  </button>
+                )}
+              </div>
+            </form>
           </div>
         </div>
       )}
