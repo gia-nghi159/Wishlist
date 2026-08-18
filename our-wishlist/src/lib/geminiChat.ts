@@ -21,7 +21,7 @@ async function getAuthedSupabaseClient() {
   });
 }
 
-// Find URLs in text
+// Extract first HTTP(S) URL from text
 function extractUrl(text: string): string | null {
   const urlRegex = /(https?:\/\/[^\s]+)/g;
   const matches = text.match(urlRegex);
@@ -35,7 +35,7 @@ export async function askGiftAssistant(query: string, friendId: string, groupId:
 
   const supabase = await getAuthedSupabaseClient();
 
-  // 1. Fetch friend's passport
+  // Fetch style profile
   const { data: profile } = await supabase
     .from("profiles")
     .select("*")
@@ -47,7 +47,7 @@ export async function askGiftAssistant(query: string, friendId: string, groupId:
     passportSummary = `Preferred Unit: ${profile.preferred_unit}, Height: ${profile.height}, Weight: ${profile.weight}, Chest: ${profile.chest}, Waist: ${profile.waist}, Inseam: ${profile.inseam}, Shirt Size: ${profile.shirt_size}, Pant Size: ${profile.pant_size}, Shoe Size: ${profile.shoe_size}, Ring Size: ${profile.ring_size}, Fit: ${profile.preferred_fit}, Metal: ${profile.metal_preference}, Style Words: ${profile.style_words}, Brands: ${profile.favorite_brands}, Dealbreakers: ${profile.dealbreakers}, Notes: ${profile.notes}`;
   }
 
-  // 2. Parse Links if the user provided one
+  // Parse URL metadata if link is present
   const url = extractUrl(query);
   let parsedLinkInfo = "";
   if (url) {
@@ -57,19 +57,17 @@ export async function askGiftAssistant(query: string, friendId: string, groupId:
     }
   }
 
-  // 3. Vector Search (if looking for similar things to the query)
-  // We embed the user's query + link info to find relevant wishes
+  // Retrieve candidate items via vector similarity
   const embedText = parsedLinkInfo ? `${query} ${parsedLinkInfo}` : query;
   const queryEmbedding = await getTextEmbedding(embedText);
   
   let relevantWishesContext = "";
   
-  // We should fetch more than 5 just in case, to give AI better context
   if (queryEmbedding.length > 0) {
     const { data: matchedWishes, error: matchError } = await supabase.rpc("match_wishes", {
       query_embedding: queryEmbedding,
-      match_threshold: 0.1, // keep lower threshold to ensure we catch relevant things
-      match_count: 3,       // fetch only the 3 closest items
+      match_threshold: 0.1,
+      match_count: 3,
       p_group_id: groupId,
       p_user_id: friendId
     });
@@ -78,7 +76,7 @@ export async function askGiftAssistant(query: string, friendId: string, groupId:
       relevantWishesContext = matchedWishes.map((w: any) => `- ${w.name}: ${w.description || 'No description'} ${w.url ? `(URL: ${w.url})` : '(No URL)'} (Reserved by: ${w.reserved_by === userId ? 'You' : w.reserved_by ? 'Someone else' : 'No one'}) (Inspo: ${w.is_inspo})`).join("\n");
     } 
     
-    // Fallback: if RPC fails OR returns 0 results
+    // Fallback if vector search returns empty or fails
     if (!relevantWishesContext) {
       console.warn("Vector search returned 0 results or failed. Falling back to fetching all wishes.");
       const { data: allWishes } = await supabase
@@ -95,7 +93,7 @@ export async function askGiftAssistant(query: string, friendId: string, groupId:
     }
   }
 
-  // 4. Generate Response using Gemini
+  // Construct prompt and invoke Gemini model
   const systemPrompt = `You are an AI Gift Assistant for a wishlist app. 
 The user is talking about buying a gift for their friend (or themselves).
 Here is the friend's exact Style Passport (their sizing and preferences):
@@ -124,20 +122,18 @@ CRITICAL RULES (ANTI-HALLUCINATION):
       generationConfig: { temperature: 0.7 }
     });
 
-    // Format history for Gemini (map 'assistant' to 'model', and drop the very last message which is the current query)
+    // Map message history to Gemini format
     let geminiHistory = history.slice(0, -1).map(msg => ({
       role: msg.role === "assistant" ? "model" : "user",
       parts: [{ text: msg.content }]
     }));
 
-    // Gemini strictly requires the first message in history to be from 'user'.
-    // If the first message is the assistant's greeting, remove it.
+    // Ensure session starts with a user turn
     if (geminiHistory.length > 0 && geminiHistory[0].role === "model") {
       geminiHistory.shift();
     }
 
     const chat = model.startChat({ history: geminiHistory });
-    // We append parsedLinkInfo to the query directly in sendMessageStream
     const finalQuery = parsedLinkInfo ? `${query}\n\n${parsedLinkInfo}` : query;
     const result = await chat.sendMessageStream(finalQuery);
     return result;

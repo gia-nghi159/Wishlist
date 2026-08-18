@@ -3,16 +3,15 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-// This gives us a reusable 'supabase' object to talk to our cloud database
+// Supabase client instance
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 /**
- * Call the stored procedure `match_wishes` that performs a hybrid vector + filter search.
- * @param queryEmbedding Vector128 array (length 768) generated from the user query.
- * @param groupId UUID of the active group workspace.
- * @param maxPrice Optional numeric price ceiling.
- * @param limit Number of results to return (default 10).
- * @returns Array of wish rows with similarity score.
+ * Performs a hybrid vector search using the match_wishes RPC procedure.
+ * @param queryEmbedding Vector embedding array of length 768.
+ * @param groupId UUID of the target group workspace.
+ * @param maxPrice Optional numeric price filter.
+ * @param limit Maximum results to return (default: 10).
  */
 export async function rpcMatchWishes(
   queryEmbedding: number[],

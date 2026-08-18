@@ -1,29 +1,8 @@
-// src/lib/embeddings.ts
-
-/**
- * Simple wrapper around a free embedding provider.
- * Choose between Google Gemini (text-embedding-004) or Groq (embedding model).
- * The function returns a float array of length 768 (compatible with pgvector).
- */
-
 import process from "process";
-import { GoogleGenerativeAI } from "@google/generative-ai"; // Gemini SDK
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-// ---------------------------------------------------------------------------
-// Configuration – pick one provider by setting the ENV variable
-// ---------------------------------------------------------------------------
-/**
- * Set `EMBEDDING_PROVIDER` in your .env.local:
- *   - "gemini" – Google Gemini embeddings (free tier on AI Studio)
- *   - (other providers are not currently supported)
- */
-// Exported constant so other modules can read the chosen provider
 export const provider = process.env.NEXT_PUBLIC_EMBEDDING_PROVIDER ?? "gemini";
 
-/**
- * Gemini client – requires API key in `NEXT_PUBLIC_GEMINI_API_KEY`.
- * For Groq you would replace this with the appropriate fetch call.
- */
 let geminiClient: GoogleGenerativeAI | null = null;
 if (provider === "gemini") {
   const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
@@ -33,7 +12,7 @@ if (provider === "gemini") {
     geminiClient = new GoogleGenerativeAI(apiKey);
   }
 }
-// If an unsupported provider is set, warn early
+
 if (provider !== "gemini") {
   console.warn(`Embedding provider "${provider}" is not recognized. Defaulting to Gemini.`);
 }

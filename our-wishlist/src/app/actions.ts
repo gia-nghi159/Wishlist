@@ -20,7 +20,7 @@ async function getAuthedSupabaseClient() {
   });
 }
 
-// Relational Security Check: Verifies a user actually belongs to a group before query execution
+// Verifies user membership in the specified group
 async function verifyMembership(supabaseClient: any, userId: string, groupId: string) {
   const { data, error } = await supabaseClient
     .from("group_members")
@@ -33,7 +33,7 @@ async function verifyMembership(supabaseClient: any, userId: string, groupId: st
   return true;
 }
 
-// Gets a complete array of all groups a user belongs to
+// Retrieves all groups associated with the authenticated user
 export async function getUserGroups() {
   const { userId } = await auth();
   if (!userId) return [];
@@ -58,7 +58,7 @@ export async function getUserGroups() {
   }
 }
 
-// UPDATED: Now fetches wishes explicitly for whichever group workspace is active
+// Retrieves all wishes for a specified group workspace
 export async function getWishesFromDatabase(groupId: string) {
   const { userId } = await auth();
   if (!userId || !groupId) return [];
@@ -81,7 +81,7 @@ export async function getWishesFromDatabase(groupId: string) {
   }
 }
 
-// UPDATED: Saves the new wish explicitly tagged to the active group context parameters
+// Creates a wish record and updates its semantic vector embedding
 export async function addWishToDatabase(name: string, isInspo: boolean, description: string, url: string, groupId: string) {
   const { userId } = await auth();
   if (!userId || !groupId) throw new Error("Unauthorized");
@@ -107,7 +107,7 @@ export async function addWishToDatabase(name: string, isInspo: boolean, descript
 
     if (error) throw error;
 
-    // Generate and store embedding
+    // Generate and persist vector embedding
     try {
       const promptText = `Wish Item: ${name}. Description: ${description || "None"}. Inspiration only: ${isInspo}.`;
       const embedding = await getTextEmbedding(promptText);
