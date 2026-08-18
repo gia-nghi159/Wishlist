@@ -9,6 +9,7 @@ import GroupOnboarding from "../components/GroupOnboarding";
 import Sidebar from "../components/Sidebar";
 import StylePassportView from "../components/StylePassportView";
 import GroupsModal from "../components/GroupsModal";
+import GiftAssistantChat from "../components/GiftAssistantChat";
 import { 
   addWishToDatabase, 
   updateWishInDatabase,
@@ -572,6 +573,11 @@ function DashboardContent() {
         onCreateGroup={handleCreateGroupAction}
         onJoinGroup={handleJoinGroupAction}
       />
+
+      {/* FLOATING GIFT ASSISTANT CHATBOT */}
+      {activeGroupId && (
+        <GiftAssistantChat friendId={activeTab} groupId={activeGroupId} />
+      )}
     </div>
   );
 }

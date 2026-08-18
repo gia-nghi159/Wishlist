@@ -1,10 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { useClerk } from "@clerk/nextjs";
 
 type OnboardingProps = {
-  // Pass both pieces of data back to the main layout
   onGroupLinked: (groupId: string, groupName: string) => void;
 };
 
@@ -15,7 +14,7 @@ export default function GroupOnboarding({ onGroupLinked }: OnboardingProps) {
   const [isJoining, setIsJoining] = useState(false);
   const { signOut } = useClerk();
 
-  const handleCreate = async (e: React.SubmitEvent<HTMLFormElement>) => {
+  const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!groupName.trim()) return;
     setIsCreating(true);
@@ -23,14 +22,16 @@ export default function GroupOnboarding({ onGroupLinked }: OnboardingProps) {
       const { createGroup } = await import("../app/actions");
       const res = await createGroup(groupName);
       onGroupLinked(res.groupId, res.groupName);
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err) {
+      if (err instanceof Error) {
+        alert(err.message);
+      }
     } finally {
       setIsCreating(false);
     }
   };
 
-  const handleJoin = async (e: React.SubmitEvent<HTMLFormElement>) => {
+  const handleJoin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!joinCode.trim()) return;
     setIsJoining(true);
@@ -38,7 +39,7 @@ export default function GroupOnboarding({ onGroupLinked }: OnboardingProps) {
       const { joinGroup } = await import("../app/actions");
       const res = await joinGroup(joinCode);
       onGroupLinked(res.groupId, res.groupName);
-    } catch (err: any) {
+    } catch (err) {
       alert("Invalid Join Code. Make sure it matches perfectly.");
     } finally {
       setIsJoining(false);

@@ -2,6 +2,7 @@
 
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { createClient } from "@supabase/supabase-js";
+import { getTextEmbedding, upsertEmbedding } from "../lib/embeddings";
 
 async function getAuthedSupabaseClient() {
   const { getToken } = await auth();
@@ -105,6 +106,18 @@ export async function addWishToDatabase(name: string, isInspo: boolean, descript
       .single();
 
     if (error) throw error;
+
+    // Generate and store embedding
+    try {
+      const promptText = `Wish Item: ${name}. Description: ${description || "None"}. Inspiration only: ${isInspo}.`;
+      const embedding = await getTextEmbedding(promptText);
+      if (embedding.length > 0) {
+        await upsertEmbedding(supabase, "wishes", "id", data.id, embedding);
+      }
+    } catch (embErr) {
+      console.error("Failed to generate embedding for new wish", embErr);
+    }
+
     return data;
   } catch (err) {
     console.error("Add Wish Security Error:", err);
@@ -236,6 +249,18 @@ export async function updateUserProfile(profileData: any) {
       });
 
     if (error) throw error;
+
+    // Generate and store embedding for profile
+    try {
+      const profileText = `Style Profile. Height: ${profileData.height || 'Unknown'}, Weight: ${profileData.weight || 'Unknown'}, Fit: ${profileData.preferred_fit || 'Unknown'}, Metal preference: ${profileData.metal_preference || 'Unknown'}. Style in 3 words: ${profileData.style_words || 'Unknown'}. Favorite Brands: ${profileData.favorite_brands || 'None'}. Dealbreakers: ${profileData.dealbreakers || 'None'}. Notes: ${profileData.notes || 'None'}`;
+      const embedding = await getTextEmbedding(profileText);
+      if (embedding.length > 0) {
+        await upsertEmbedding(supabase, "profiles", "user_id", userId, embedding);
+      }
+    } catch (embErr) {
+      console.error("Failed to generate embedding for profile", embErr);
+    }
+
     return { success: true };
   } catch (err) {
     console.error("Failed to update profile:", err);
@@ -390,6 +415,18 @@ export async function updateWishInDatabase(id: number, name: string, isInspo: bo
     .eq("user_id", userId); // Ensure they own the wish
 
   if (error) throw error;
+
+  // Generate and store updated embedding
+  try {
+    const promptText = `Wish Item: ${name}. Description: ${description || "None"}. Inspiration only: ${isInspo}.`;
+    const embedding = await getTextEmbedding(promptText);
+    if (embedding.length > 0) {
+      await upsertEmbedding(supabase, "wishes", "id", id, embedding);
+    }
+  } catch (embErr) {
+    console.error("Failed to update embedding for wish", embErr);
+  }
+
   return true;
 }
 
