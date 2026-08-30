@@ -2,8 +2,6 @@
 
 A beautifully designed, AI-powered shared wishlist application built for families, friends, and couples. Create private groups, share gift ideas, reserve items without ruining the surprise, manage your personal "Style Passport", and use an integrated AI Gift Assistant powered by Retrieval-Augmented Generation (RAG) to find the perfect gift.
 
-**[🚀 Try the live app here!](https://your-live-website-link-here.com)**
-
 ---
 
 ## ✨ Features
