@@ -3,26 +3,27 @@
 import { useState } from "react";
 
 type AddGiftFormProps = {
-  onSubmit: (name: string, isInspo: boolean, description: string, url: string) => void;
+  onSubmit: (name: string, isInspo: boolean, description: string, url: string, price: string) => void;
   onClose: () => void; 
-  initialData?: { name: string; isInspo: boolean; description: string; url: string } | null;
+  initialData?: { name: string; isInspo: boolean; description: string; url: string; price?: string } | null;
 };
 
 export default function AddGiftForm({ onSubmit, onClose, initialData }: AddGiftFormProps) {
   const [name, setName] = useState(initialData?.name || "");
   const [url, setUrl] = useState(initialData?.url || "");
+  const [price, setPrice] = useState(initialData?.price || "");
   const [isInspo, setIsInspo] = useState(initialData?.isInspo || false);
   const [description, setDescription] = useState(initialData?.description || "");
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!name) return;
 
-    onSubmit(name, isInspo, description, url);
+    onSubmit(name, isInspo, description, url, price);
 
     if (!initialData) {
       setName("");
       setUrl("");
+      setPrice("");
       setIsInspo(false);
       setDescription("");
     }
@@ -52,7 +53,6 @@ export default function AddGiftForm({ onSubmit, onClose, initialData }: AddGiftF
           value={name}
           onChange={(e) => setName(e.target.value)}
           className="w-full p-3 border border-[#D0E7D2] rounded-lg bg-gray-50 focus:bg-white text-[#618264] focus:outline-none focus:ring-2 focus:ring-[#D0E7D2] transition-colors"
-          required
         />
         
         <textarea 
@@ -70,6 +70,8 @@ export default function AddGiftForm({ onSubmit, onClose, initialData }: AddGiftF
           onChange={(e) => setUrl(e.target.value)}
           className="w-full p-3 border border-[#D0E7D2] rounded-lg bg-gray-50 focus:bg-white text-[#618264] focus:outline-none focus:ring-2 focus:ring-[#D0E7D2] transition-colors"
         />
+
+
 
         <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-[#D0E7D2]">
           <span className="font-medium text-[#618264] flex items-center gap-2">

@@ -39,7 +39,7 @@ export default function GroupOnboarding({ onGroupLinked }: OnboardingProps) {
       const { joinGroup } = await import("../app/actions");
       const res = await joinGroup(joinCode);
       onGroupLinked(res.groupId, res.groupName);
-    } catch (err) {
+    } catch {
       alert("Invalid Join Code. Make sure it matches perfectly.");
     } finally {
       setIsJoining(false);

@@ -1,7 +1,13 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "2mb",
+    },
+  },
+  serverExternalPackages: ['@google/generative-ai'], 
+  logging: { fetches: { fullUrl: true } }
 };
 
 export default nextConfig;

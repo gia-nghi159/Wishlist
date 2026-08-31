@@ -1,8 +1,8 @@
-import { auth } from "@clerk/nextjs/server";
-import { createClient } from "@supabase/supabase-js";
+import crypto from "crypto";
+import { getAuthContext } from "./auth";
 import { getTextEmbedding } from "./embeddings";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { parseLinkMetadata } from "./linkParser";
+import { AppError } from "./errors";
 
 const provider = process.env.NEXT_PUBLIC_EMBEDDING_PROVIDER ?? "gemini";
 let geminiClient: GoogleGenerativeAI | null = null;
@@ -13,88 +13,45 @@ if (provider === "gemini") {
   }
 }
 
-async function getAuthedSupabaseClient() {
-  const { getToken } = await auth();
-  const token = await getToken({ template: "supabase" });
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
-}
-
-// Extract first HTTP(S) URL from text
+// Extract primary HTTP(S) URL
 function extractUrl(text: string): string | null {
   const urlRegex = /(https?:\/\/[^\s]+)/g;
   const matches = text.match(urlRegex);
   return matches ? matches[0] : null;
 }
 
-export async function askGiftAssistant(query: string, friendId: string, groupId: string, history: any[] = []) {
-  if (!geminiClient) throw new Error("Gemini API key not configured");
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
+function buildPassportSummary(profile: any): string {
+  if (!profile) return "No style passport provided.";
+  return `Preferred Unit: ${profile.preferred_unit}, Height: ${profile.height}, Weight: ${profile.weight}, Chest: ${profile.chest}, Waist: ${profile.waist}, Inseam: ${profile.inseam}, Shirt Size: ${profile.shirt_size}, Pant Size: ${profile.pant_size}, Shoe Size: ${profile.shoe_size}, Ring Size: ${profile.ring_size}, Fit: ${profile.preferred_fit}, Metal: ${profile.metal_preference}, Style Words: ${profile.style_words}, Brands: ${profile.favorite_brands}, Dealbreakers: ${profile.dealbreakers}, Notes: ${profile.notes}`;
+}
 
-  const supabase = await getAuthedSupabaseClient();
 
-  // Fetch style profile
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("user_id", friendId)
-    .single();
 
-  let passportSummary = "No style passport provided.";
-  if (profile) {
-    passportSummary = `Preferred Unit: ${profile.preferred_unit}, Height: ${profile.height}, Weight: ${profile.weight}, Chest: ${profile.chest}, Waist: ${profile.waist}, Inseam: ${profile.inseam}, Shirt Size: ${profile.shirt_size}, Pant Size: ${profile.pant_size}, Shoe Size: ${profile.shoe_size}, Ring Size: ${profile.ring_size}, Fit: ${profile.preferred_fit}, Metal: ${profile.metal_preference}, Style Words: ${profile.style_words}, Brands: ${profile.favorite_brands}, Dealbreakers: ${profile.dealbreakers}, Notes: ${profile.notes}`;
-  }
-
-  // Parse URL metadata if link is present
-  const url = extractUrl(query);
-  let parsedLinkInfo = "";
-  if (url) {
-    const meta = await parseLinkMetadata(url);
-    if (meta.title || meta.description) {
-      parsedLinkInfo = `\n[Context: The user provided a link. Extracted Info: Title: ${meta.title || 'N/A'}, Description: ${meta.description || 'N/A'}, Price: ${meta.price || 'N/A'}]`;
-    }
-  }
-
-  // Retrieve candidate items via vector similarity
-  const embedText = parsedLinkInfo ? `${query} ${parsedLinkInfo}` : query;
-  const queryEmbedding = await getTextEmbedding(embedText);
-  
+async function buildWishContext(supabase: any, matchedWishes: any[], userId: string, friendId: string, groupId: string) {
   let relevantWishesContext = "";
-  
-  if (queryEmbedding.length > 0) {
-    const { data: matchedWishes, error: matchError } = await supabase.rpc("match_wishes", {
-      query_embedding: queryEmbedding,
-      match_threshold: 0.1,
-      match_count: 3,
-      p_group_id: groupId,
-      p_user_id: friendId
-    });
 
-    if (!matchError && matchedWishes && matchedWishes.length > 0) {
-      relevantWishesContext = matchedWishes.map((w: any) => `- ${w.name}: ${w.description || 'No description'} ${w.url ? `(URL: ${w.url})` : '(No URL)'} (Reserved by: ${w.reserved_by === userId ? 'You' : w.reserved_by ? 'Someone else' : 'No one'}) (Inspo: ${w.is_inspo})`).join("\n");
-    } 
-    
-    // Fallback if vector search returns empty or fails
-    if (!relevantWishesContext) {
-      console.warn("Vector search returned 0 results or failed. Falling back to fetching all wishes.");
-      const { data: allWishes } = await supabase
-        .from("wishes")
-        .select("*")
-        .eq("user_id", friendId)
-        .eq("group_id", groupId)
-        .limit(50);
-      if (allWishes && allWishes.length > 0) {
-         relevantWishesContext = allWishes.map(w => `- ${w.name}: ${w.description || ''} ${w.url ? `(URL: ${w.url})` : '(No URL)'} (Reserved by: ${w.reserved_by === userId ? 'You' : w.reserved_by ? 'Someone else' : 'No one'})`).join("\n");
-      } else {
-         relevantWishesContext = "EMPTY - The user has NO items on their wishlist.";
-      }
+  if (matchedWishes && matchedWishes.length > 0) {
+    relevantWishesContext = matchedWishes.map((w: any) => `- ${w.name}: ${w.description || 'No description'} ${w.url ? `(URL: ${w.url})` : '(No URL)'} (Reserved by: ${w.reserved_by === userId ? 'You' : w.reserved_by ? 'Someone else' : 'No one'}) (Inspo: ${w.is_inspo})`).join("\n");
+  } 
+  
+  if (!relevantWishesContext) {
+    const { data: allWishes } = await supabase
+      .from("wishes")
+      .select("*")
+      .eq("user_id", friendId)
+      .eq("group_id", groupId)
+      .limit(50);
+    if (allWishes && allWishes.length > 0) {
+       relevantWishesContext = allWishes.map((w: any) => `- ${w.name}: ${w.description || ''} ${w.url ? `(URL: ${w.url})` : '(No URL)'} (Reserved by: ${w.reserved_by === userId ? 'You' : w.reserved_by ? 'Someone else' : 'No one'})`).join("\n");
+    } else {
+       relevantWishesContext = "EMPTY - The user has NO items on their wishlist.";
     }
   }
+  return relevantWishesContext;
+}
 
-  // Construct prompt and invoke Gemini model
-  const systemPrompt = `You are an AI Gift Assistant for a wishlist app. 
+function buildSystemPrompt(passportSummary: string, relevantWishesContext: string, query: string) {
+  return `You are an AI Gift Assistant for a wishlist app. 
 The user is talking about buying a gift for their friend (or themselves).
 Here is the friend's exact Style Passport (their sizing and preferences):
 ${passportSummary}
@@ -102,7 +59,7 @@ ${passportSummary}
 Here is the friend's EXACT wishlist:
 ${relevantWishesContext}
 
-User's Query: ${query} ${parsedLinkInfo}
+User's Query: ${query}
 
 CRITICAL RULES (ANTI-HALLUCINATION):
 1. You are strictly a formatter for the database. DO NOT invent, suggest, or hallucinate ANY gift ideas that are not explicitly listed in the wishlist above.
@@ -114,6 +71,60 @@ CRITICAL RULES (ANTI-HALLUCINATION):
 7. If an item has a URL listed, ALWAYS provide the URL as a clickable markdown link when mentioning or recommending the item. If it says '(No URL)', DO NOT create a broken markdown link.
 8. If an item is marked as "Reserved by: Someone else", explicitly warn the user that someone else has already reserved it. If it is marked as "Reserved by: You", reassure the user that they have already reserved it.
 9. If the user provides a link to an item to evaluate, compare its category and style to the wishlist. If a closely matching item is already on the wishlist AND it has its own exact URL, highly recommend that they buy the item explicitly listed on the wishlist instead (since it's safer), and provide that exact clickable URL.`;
+}
+
+export async function askGiftAssistant(query: string, friendId: string, groupId: string, history: any[] = []) {
+  if (!geminiClient) throw new AppError("AI_ERROR", "Gemini API key not configured", 503);
+  const { userId, supabase } = await getAuthContext();
+
+  const url = extractUrl(query);
+
+  const [profileResult, embeddingResult] = await Promise.all([
+    supabase.from("profiles").select("*").eq("user_id", friendId).single(),
+    getTextEmbedding(url ? `${query} ${url}` : query),
+  ]);
+
+  const passportSummary = buildPassportSummary(profileResult.data);
+  const queryEmbedding = embeddingResult;
+  
+  let matchedWishes: any[] = [];
+  if (queryEmbedding.length > 0) {
+    const { data } = await supabase.rpc("match_wishes_hybrid", {
+      query_text: query,
+      query_embedding: queryEmbedding,
+      match_count: 3,
+      p_group_id: groupId,
+      p_user_id: friendId
+    });
+    matchedWishes = data || [];
+  }
+
+  const relevantWishesContext = await buildWishContext(supabase, matchedWishes, userId, friendId, groupId);
+  
+  // Context Hashing for Semantic Cache Invalidation
+  const contextHash = crypto.createHash("md5")
+    .update(groupId + relevantWishesContext + JSON.stringify(history))
+    .digest("hex");
+  
+  if (queryEmbedding.length > 0) {
+    const { data: cacheHits } = await supabase.rpc("check_semantic_cache", {
+      query_embedding: queryEmbedding,
+      p_context_hash: contextHash,
+      match_threshold: 0.95
+    });
+    
+    if (cacheHits && cacheHits.length > 0) {
+      console.log("[Semantic Cache] HIT!");
+      return {
+        stream: (async function* () {
+          yield { text: () => cacheHits[0].cached_response };
+        })()
+      };
+    }
+  }
+  console.log("[Semantic Cache] MISS. Fetching from Gemini...");
+
+  const systemPrompt = buildSystemPrompt(passportSummary, relevantWishesContext, query);
 
   try {
     const model = geminiClient.getGenerativeModel({ 
@@ -122,23 +133,41 @@ CRITICAL RULES (ANTI-HALLUCINATION):
       generationConfig: { temperature: 0.7 }
     });
 
-    // Map message history to Gemini format
     let geminiHistory = history.slice(0, -1).map(msg => ({
       role: msg.role === "assistant" ? "model" : "user",
       parts: [{ text: msg.content }]
     }));
 
-    // Ensure session starts with a user turn
     if (geminiHistory.length > 0 && geminiHistory[0].role === "model") {
       geminiHistory.shift();
     }
 
     const chat = model.startChat({ history: geminiHistory });
-    const finalQuery = parsedLinkInfo ? `${query}\n\n${parsedLinkInfo}` : query;
-    const result = await chat.sendMessageStream(finalQuery);
-    return result;
+    const result = await chat.sendMessageStream(query);
+    
+    return {
+      stream: (async function* () {
+        let fullResponse = "";
+        for await (const chunk of result.stream) {
+          const text = chunk.text();
+          fullResponse += text;
+          yield chunk;
+        }
+        
+        // Save to cache asynchronously
+        if (queryEmbedding.length > 0) {
+          supabase.from("semantic_cache").insert({
+            query_text: query,
+            query_embedding: queryEmbedding,
+            context_hash: contextHash,
+            cached_response: fullResponse
+          }).then(() => console.log("[Semantic Cache] Saved new response"))
+          .catch((err: any) => console.error("[Semantic Cache] Failed to save", err));
+        }
+      })()
+    };
   } catch (err) {
     console.error("Gemini Generation Error:", err);
-    throw new Error("Failed to generate response.");
+    throw new AppError("AI_ERROR", "Failed to generate response.", 500);
   }
 }

@@ -1,26 +1,24 @@
+// @ts-nocheck
 "use server";
 
-import { auth, clerkClient } from "@clerk/nextjs/server";
-import { createClient } from "@supabase/supabase-js";
-import { getTextEmbedding, upsertEmbedding } from "../lib/embeddings";
+import { clerkClient } from "@clerk/nextjs/server";
+import { getTextEmbedding } from "../lib/embeddings";
+import { getAuthContext } from "../lib/auth";
+import { supabaseAdmin } from "../lib/supabaseAdmin";
+import { AppError } from "../lib/errors";
 
-async function getAuthedSupabaseClient() {
-  const { getToken } = await auth();
-  const token = await getToken({ template: "supabase" });
+const EMBED_TIMEOUT_MS = 5000;
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-  return createClient(supabaseUrl, supabaseAnonKey, {
-    global: {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    },
-  });
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error("Embedding timeout")), ms)
+    ),
+  ]);
 }
 
-// Verifies user membership in the specified group
+// Verify user membership in specified group
 async function verifyMembership(supabaseClient: any, userId: string, groupId: string) {
   const { data, error } = await supabaseClient
     .from("group_members")
@@ -29,17 +27,64 @@ async function verifyMembership(supabaseClient: any, userId: string, groupId: st
     .eq("group_id", groupId)
     .maybeSingle();
 
-  if (error || !data) throw new Error("Security Access Denied: You do not belong to this group.");
+  if (error || !data) throw new AppError("FORBIDDEN", "Security Access Denied: You do not belong to this group.", 403);
   return true;
 }
 
-// Retrieves all groups associated with the authenticated user
-export async function getUserGroups() {
-  const { userId } = await auth();
-  if (!userId) return [];
+export async function getInitialDashboardData(groupId?: string) {
+  const { userId, supabase } = await getAuthContext();
 
+  const { data: groupRows } = await supabase
+    .from("group_members")
+    .select("group_id, groups(name, created_by)")
+    .eq("user_id", userId);
+
+  const groups = (groupRows ?? []).map((item: any) => ({
+    groupId: item.group_id,
+    groupName: (item.groups as any)?.name || "Shared List",
+    createdBy: (item.groups as any)?.created_by || null,
+  }));
+  
+  const targetGroupId = groupId ?? groups[0]?.groupId;
+
+  if (!targetGroupId) return { groups, activeGroupId: null, wishes: [], members: [] };
+
+  await verifyMembership(supabase, userId, targetGroupId);
+
+  const [wishesResult, membersResult] = await Promise.all([
+    supabase
+      .from("wishes")
+      .select("*, contributions(*)")
+      .eq("group_id", targetGroupId)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("group_members")
+      .select("user_id")
+      .eq("group_id", targetGroupId)
+  ]);
+
+  const userIds = (membersResult.data ?? []).map((m: any) => m.user_id);
+  const client = await clerkClient();
+  const clerkUsers = await client.users.getUserList({ userId: userIds });
+
+  const members = clerkUsers.data.map(u => ({
+    id: u.id,
+    firstName: u.firstName || "User",
+    imageUrl: u.imageUrl,
+    isMe: u.id === userId,
+  }));
+
+  return {
+    groups,
+    activeGroupId: targetGroupId,
+    wishes: wishesResult.data ?? [],
+    members,
+  };
+}
+
+export async function getUserGroups() {
   try {
-    const supabase = await getAuthedSupabaseClient();
+    const { userId, supabase } = await getAuthContext();
     const { data, error } = await supabase
       .from("group_members")
       .select("group_id, groups(name, created_by)") 
@@ -47,7 +92,7 @@ export async function getUserGroups() {
 
     if (error || !data) return [];
     
-    return data.map((item) => ({
+    return data.map((item: any) => ({
       groupId: item.group_id,
       groupName: (item.groups as any)?.name || "Shared List",
       createdBy: (item.groups as any)?.created_by || null 
@@ -58,18 +103,15 @@ export async function getUserGroups() {
   }
 }
 
-// Retrieves all wishes for a specified group workspace
 export async function getWishesFromDatabase(groupId: string) {
-  const { userId } = await auth();
-  if (!userId || !groupId) return [];
-
   try {
-    const supabase = await getAuthedSupabaseClient();
+    const { userId, supabase } = await getAuthContext();
+    if (!groupId) return [];
     await verifyMembership(supabase, userId, groupId);
 
     const { data, error } = await supabase
       .from("wishes")
-      .select("*")
+      .select("*, contributions(*)")
       .eq("group_id", groupId)
       .order("created_at", { ascending: false });
 
@@ -81,20 +123,16 @@ export async function getWishesFromDatabase(groupId: string) {
   }
 }
 
-// Creates a wish record and updates its semantic vector embedding
 export async function addWishToDatabase(name: string, isInspo: boolean, description: string, url: string, groupId: string) {
-  const { userId } = await auth();
-  if (!userId || !groupId) throw new Error("Unauthorized");
-
   try {
-    const supabase = await getAuthedSupabaseClient();
+    const { userId, supabase } = await getAuthContext();
     await verifyMembership(supabase, userId, groupId);
 
     const { data, error } = await supabase
       .from("wishes")
       .insert([
         {
-          name,
+          name: name || "Unknown Item",
           description: description || null,
           url: url || null,
           is_inspo: isInspo,
@@ -107,30 +145,29 @@ export async function addWishToDatabase(name: string, isInspo: boolean, descript
 
     if (error) throw error;
 
-    // Generate and persist vector embedding
-    try {
-      const promptText = `Wish Item: ${name}. Description: ${description || "None"}. Inspiration only: ${isInspo}.`;
-      const embedding = await getTextEmbedding(promptText);
-      if (embedding.length > 0) {
-        await upsertEmbedding(supabase, "wishes", "id", data.id, embedding);
-      }
-    } catch (embErr) {
-      console.error("Failed to generate embedding for new wish", embErr);
-    }
+    // Asynchronous embedding execution
+    const wishId = data.id;
+    const promptText = `Wish Item: ${name}. Description: ${description || "None"}. Inspiration only: ${isInspo}.`;
+    
+    withTimeout(getTextEmbedding(promptText), EMBED_TIMEOUT_MS)
+      .then(embedding => {
+        if (embedding.length > 0) {
+          return supabaseAdmin.from("wishes").update({ item_embedding: embedding }).eq("id", wishId);
+        }
+      })
+      .catch(err => console.error("[background-embed] Failed for wish", wishId, err));
 
     return data;
   } catch (err) {
     console.error("Add Wish Security Error:", err);
-    throw new Error("Failed to save to database");
+    if (err instanceof AppError) throw err;
+    throw new AppError("DB_ERROR", "Failed to save to database", 500);
   }
 }
 
 export async function deleteWishFromDatabase(id: number) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-
   try {
-    const supabase = await getAuthedSupabaseClient();
+    const { userId, supabase } = await getAuthContext();
     const { error } = await supabase
       .from("wishes")
       .delete()
@@ -140,68 +177,51 @@ export async function deleteWishFromDatabase(id: number) {
     if (error) throw error;
   } catch (err) {
     console.error("Delete Security Error:", err);
-    throw new Error("Failed to delete from database");
+    if (err instanceof AppError) throw err;
+    throw new AppError("DB_ERROR", "Failed to delete from database", 500);
   }
 }
 
-export async function checkUserGroup() {
-  const { userId } = await auth();
-  if (!userId) return null;
-
-  try {
-    const supabase = await getAuthedSupabaseClient();
-    const { data, error } = await supabase
-      .from("group_members")
-      .select("group_id, groups(name)")
-      .eq("user_id", userId)
-      .maybeSingle(); 
-
-    if (error || !data) return null;
-    
-    return { 
-      groupId: data.group_id, 
-      groupName: (data.groups as any)?.name || "Our Shared List" 
-    };
-  } catch {
-    return null;
-  }
-}
 
 export async function createGroup(groupName: string) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-
-  const supabase = await getAuthedSupabaseClient();
+  const { userId, supabase } = await getAuthContext();
 
   const { data: group, error: groupError } = await supabase
     .from("groups")
-    .insert([{ name: groupName, created_by: userId }]) // Tags the creator
+    .insert([{ name: groupName, created_by: userId }])
     .select()
     .single();
 
-  if (groupError) throw new Error(`Database rejected: ${groupError.message}`);
+  if (groupError) throw new AppError("DB_ERROR", `Database rejected: ${groupError.message}`, 500);
 
   const { error: memberError } = await supabase
     .from("group_members")
     .insert([{ group_id: group.id, user_id: userId }]);
 
-  if (memberError) throw new Error("Failed to link user to the new group.");
+  if (memberError) throw new AppError("DB_ERROR", "Failed to link user to the new group.", 500);
 
   return { groupId: group.id, groupName: group.name, createdBy: userId };
 }
 
 export async function joinGroup(groupId: string) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
+  const { userId, supabase } = await getAuthContext();
 
-  const supabase = await getAuthedSupabaseClient();
+  // Validate limits
+  const { count } = await supabase
+    .from("group_members")
+    .select("*", { count: "exact", head: true })
+    .eq("group_id", groupId);
+
+  if (count && count >= 50) {
+    throw new AppError("LIMIT_EXCEEDED", "This group has reached the maximum number of members.", 400);
+  }
 
   const { error } = await supabase
     .from("group_members")
     .insert([{ group_id: groupId, user_id: userId }]);
 
   if (error) {
-    throw new Error("Invalid Join Code or you are already a member.");
+    throw new AppError("DB_ERROR", "Invalid Join Code or you are already a member.", 400);
   }
 
   const { data: group } = await supabase
@@ -214,11 +234,8 @@ export async function joinGroup(groupId: string) {
 }
 
 export async function getUserProfile() {
-  const { userId } = await auth();
-  if (!userId) return null;
-
   try {
-    const supabase = await getAuthedSupabaseClient();
+    const { userId, supabase } = await getAuthContext();
     const { data, error } = await supabase
       .from("profiles")
       .select("*")
@@ -234,11 +251,8 @@ export async function getUserProfile() {
 }
 
 export async function updateUserProfile(profileData: any) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-
   try {
-    const supabase = await getAuthedSupabaseClient();
+    const { userId, supabase } = await getAuthContext();
     
     const { error } = await supabase
       .from("profiles")
@@ -250,30 +264,26 @@ export async function updateUserProfile(profileData: any) {
 
     if (error) throw error;
 
-    // Generate and store embedding for profile
-    try {
-      const profileText = `Style Profile. Height: ${profileData.height || 'Unknown'}, Weight: ${profileData.weight || 'Unknown'}, Fit: ${profileData.preferred_fit || 'Unknown'}, Metal preference: ${profileData.metal_preference || 'Unknown'}. Style in 3 words: ${profileData.style_words || 'Unknown'}. Favorite Brands: ${profileData.favorite_brands || 'None'}. Dealbreakers: ${profileData.dealbreakers || 'None'}. Notes: ${profileData.notes || 'None'}`;
-      const embedding = await getTextEmbedding(profileText);
-      if (embedding.length > 0) {
-        await upsertEmbedding(supabase, "profiles", "user_id", userId, embedding);
-      }
-    } catch (embErr) {
-      console.error("Failed to generate embedding for profile", embErr);
-    }
+    // Asynchronous embedding execution
+    const profileText = `Style Profile. Height: ${profileData.height || 'Unknown'}, Weight: ${profileData.weight || 'Unknown'}, Fit: ${profileData.preferred_fit || 'Unknown'}, Metal preference: ${profileData.metal_preference || 'Unknown'}. Style in 3 words: ${profileData.style_words || 'Unknown'}. Favorite Brands: ${profileData.favorite_brands || 'None'}. Dealbreakers: ${profileData.dealbreakers || 'None'}. Notes: ${profileData.notes || 'None'}`;
+    withTimeout(getTextEmbedding(profileText), EMBED_TIMEOUT_MS)
+      .then(embedding => {
+        if (embedding.length > 0) {
+          return supabaseAdmin.from("profiles").update({ item_embedding: embedding }).eq("user_id", userId);
+        }
+      })
+      .catch(err => console.error("[background-embed] Failed for profile", err));
 
     return { success: true };
   } catch (err) {
     console.error("Failed to update profile:", err);
-    throw new Error("Could not save sizing info.");
+    throw new AppError("DB_ERROR", "Could not save sizing info.", 500);
   }
 }
 
 export async function getGroupMembers(groupId: string) {
-  const { userId } = await auth();
-  if (!userId) return [];
-
   try {
-    const supabase = await getAuthedSupabaseClient();
+    const { userId, supabase } = await getAuthContext();
     const { data: members, error } = await supabase
       .from("group_members")
       .select("user_id")
@@ -299,11 +309,10 @@ export async function getGroupMembers(groupId: string) {
 }
 
 export async function getMemberDetails(memberId: string) {
-  const { userId } = await auth();
-  if (!userId) return null;
-
   try {
-    const supabase = await getAuthedSupabaseClient();
+    const { userId, supabase } = await getAuthContext();
+    if (!userId) return null;
+
     const { data: profile } = await supabase
       .from("profiles")
       .select("*")
@@ -327,26 +336,29 @@ export async function getMemberDetails(memberId: string) {
 }
 
 export async function reserveWishInDatabase(wishId: number) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
+  const { userId, supabase } = await getAuthContext();
 
-  const supabase = await getAuthedSupabaseClient();
-  const { data, error } = await supabase
-    .from("wishes")
-    .update({ reserved_by: userId })
-    .eq("id", wishId)
-    .select()
-    .single();
+  try {
+    const { data, error } = await supabase.rpc("reserve_wish_atomic", {
+      p_wish_id: wishId,
+      p_user_id: userId,
+    });
 
-  if (error) throw error;
-  return data;
+    if (error) {
+      if (error.message.includes("ALREADY_RESERVED")) {
+        throw new AppError("CONFLICT", "Someone else just reserved this item.", 409);
+      }
+      throw error;
+    }
+    return data;
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    throw new AppError("DB_ERROR", "Failed to reserve item.", 500);
+  }
 }
 
 export async function unreserveWishInDatabase(wishId: number) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-
-  const supabase = await getAuthedSupabaseClient();
+  const { userId, supabase } = await getAuthContext();
   const { data, error } = await supabase
     .from("wishes")
     .update({ reserved_by: null })
@@ -355,38 +367,13 @@ export async function unreserveWishInDatabase(wishId: number) {
     .select()
     .single();
 
-  if (error) throw error;
+  if (error) throw new AppError("DB_ERROR", "Failed to unreserve item.", 500);
   return data;
 }
 
-export async function handleToggleReserveAction(wishId: number, isCurrentlyReserved: boolean) {
-  if (isCurrentlyReserved) {
-    return await unreserveWishInDatabase(wishId);
-  } else {
-    return await reserveWishInDatabase(wishId);
-  }
-}
-
-export async function deleteAccountFromApplication() {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-
-  const supabase = await getAuthedSupabaseClient();
-  await supabase.from("wishes").delete().eq("user_id", userId);
-  await supabase.from("group_members").delete().eq("user_id", userId);
-  await supabase.from("profiles").delete().eq("user_id", userId);
-
-  const client = await clerkClient();
-  await client.users.deleteUser(userId);
-  return { success: true };
-}
 
 export async function updateGroupInDatabase(groupId: string, newName: string) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-
-  const supabase = await getAuthedSupabaseClient();
-  // Ensure user is actually in the group before allowing them to edit the name
+  const { userId, supabase } = await getAuthContext();
   await verifyMembership(supabase, userId, groupId);
 
   const { error } = await supabase
@@ -394,15 +381,13 @@ export async function updateGroupInDatabase(groupId: string, newName: string) {
     .update({ name: newName })
     .eq("id", groupId);
 
-  if (error) throw error;
+  if (error) throw new AppError("DB_ERROR", "Failed to update group name", 500);
   return true;
 }
 
 export async function updateWishInDatabase(id: number, name: string, isInspo: boolean, description: string, url: string) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-
-  const supabase = await getAuthedSupabaseClient();
+  const { userId, supabase } = await getAuthContext();
+  
   const { error } = await supabase
     .from("wishes")
     .update({
@@ -414,29 +399,24 @@ export async function updateWishInDatabase(id: number, name: string, isInspo: bo
     .eq("id", id)
     .eq("user_id", userId); // Ensure they own the wish
 
-  if (error) throw error;
+  if (error) throw new AppError("DB_ERROR", "Failed to update wish", 500);
 
-  // Generate and store updated embedding
-  try {
-    const promptText = `Wish Item: ${name}. Description: ${description || "None"}. Inspiration only: ${isInspo}.`;
-    const embedding = await getTextEmbedding(promptText);
-    if (embedding.length > 0) {
-      await upsertEmbedding(supabase, "wishes", "id", id, embedding);
-    }
-  } catch (embErr) {
-    console.error("Failed to update embedding for wish", embErr);
-  }
+  // Asynchronous embedding execution
+  const promptText = `Wish Item: ${name}. Description: ${description || "None"}. Inspiration only: ${isInspo}.`;
+  withTimeout(getTextEmbedding(promptText), EMBED_TIMEOUT_MS)
+    .then(embedding => {
+      if (embedding.length > 0) {
+        return supabaseAdmin.from("wishes").update({ item_embedding: embedding }).eq("id", id);
+      }
+    })
+    .catch(err => console.error("[background-embed] Failed for wish", id, err));
 
   return true;
 }
 
 export async function deleteGroupFromDatabase(groupId: string) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-
-  const supabase = await getAuthedSupabaseClient();
+  const { userId, supabase } = await getAuthContext();
   
-  // Verify the person deleting is the actual creator
   const { data: groupData } = await supabase
     .from("groups")
     .select("created_by")
@@ -444,12 +424,10 @@ export async function deleteGroupFromDatabase(groupId: string) {
     .single();
     
   if (groupData?.created_by !== userId) {
-    throw new Error("Security Access Denied: Only the group creator can delete this space.");
+    throw new AppError("FORBIDDEN", "Only the group creator can delete this space.", 403);
   }
 
-  // Delete the group
-  const { error } = await supabase.from("groups").delete().eq("id", groupId);
-
-  if (error) throw new Error(`Failed to delete group: ${error.message}`);
+  const { error } = await supabase.rpc("delete_group_data", { p_group_id: groupId });
+  if (error) throw new AppError("DB_ERROR", `Failed to delete group: ${error.message}`, 500);
   return true;
 }

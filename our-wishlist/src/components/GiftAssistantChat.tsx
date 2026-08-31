@@ -22,7 +22,7 @@ export default function GiftAssistantChat({ friendId, groupId }: { friendId: str
   const [selectedFriendId, setSelectedFriendId] = useState<string | null>(friendId !== "all" ? friendId : null);
 
   useEffect(() => {
-    // Reset selection if props change
+    // Reset selection on props change
     setSelectedFriendId(friendId !== "all" ? friendId : null);
     if (friendId === "all" && groupId && groupId !== "none") {
       getGroupMembers(groupId).then(setMembers);
@@ -49,10 +49,11 @@ export default function GiftAssistantChat({ friendId, groupId }: { friendId: str
     setIsLoading(true);
 
     try {
+      const apiHistory = newHistory.slice(-5);
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: userMessage, friendId: selectedFriendId, groupId, history: newHistory })
+        body: JSON.stringify({ query: userMessage, friendId: selectedFriendId, groupId, history: apiHistory })
       });
 
       if (!response.ok) throw new Error('Failed to fetch');
@@ -85,7 +86,7 @@ export default function GiftAssistantChat({ friendId, groupId }: { friendId: str
         }
       }
       if (firstChunk) setIsLoading(false);
-    } catch (err) {
+    } catch {
       setIsLoading(false);
       setMessages(prev => [...prev, { role: "assistant", content: "Oops, something went wrong while asking the AI." }]);
     }
@@ -132,12 +133,12 @@ export default function GiftAssistantChat({ friendId, groupId }: { friendId: str
                   ) : (
                     <ReactMarkdown
                       components={{
-                        p: ({node, ...props}) => <p className="mb-2 last:mb-0" {...props} />,
-                        a: ({node, ...props}) => <a className="text-[#618264] underline hover:text-[#4A6A4C]" target="_blank" rel="noopener noreferrer" {...props} />,
-                        ul: ({node, ...props}) => <ul className="list-disc pl-4 mb-2" {...props} />,
-                        ol: ({node, ...props}) => <ol className="list-decimal pl-4 mb-2" {...props} />,
-                        li: ({node, ...props}) => <li className="mb-1" {...props} />,
-                        strong: ({node, ...props}) => <strong className="font-bold text-gray-800" {...props} />
+                        p: ({node: _node, ...props}: any) => <p className="mb-2 last:mb-0" {...props} />,
+                        a: ({node: _node, ...props}: any) => <a className="text-[#618264] underline hover:text-[#4A6A4C]" target="_blank" rel="noopener noreferrer" {...props} />,
+                        ul: ({node: _node, ...props}: any) => <ul className="list-disc pl-4 mb-2" {...props} />,
+                        ol: ({node: _node, ...props}: any) => <ol className="list-decimal pl-4 mb-2" {...props} />,
+                        li: ({node: _node, ...props}: any) => <li className="mb-1" {...props} />,
+                        strong: ({node: _node, ...props}: any) => <strong className="font-bold text-gray-800" {...props} />
                       }}
                     >
                       {msg.content}
