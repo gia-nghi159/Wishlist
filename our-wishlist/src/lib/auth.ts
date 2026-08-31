@@ -24,8 +24,7 @@ export async function getAuthContext(): Promise<AuthContext> {
 
   const supabase = createClient<any>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    supabaseToken || process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { global: { headers: { Authorization: `Bearer ${supabaseToken || ''}` } } }
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
   return { userId, supabase };
