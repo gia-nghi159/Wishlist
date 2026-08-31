@@ -28,7 +28,7 @@ export default function RootLayout({
     // 2. Wrap HTML in provider
     <ClerkProvider>
       <html lang="en">
-        <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-50`}>
+        <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-50 h-screen overflow-hidden`}>
           {children}
         </body>
       </html>
